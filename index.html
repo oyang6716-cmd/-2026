@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 粒子点云与多媒体互动平台</title>
+    <!-- 引入 FontAwesome 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            color: white;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* ---------------------------------
+           底部 Dock 控制面板样式重构
+           --------------------------------- */
+        #ui-layer {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: auto;
+            z-index: 10;
+            pointer-events: none; /* 防止层遮挡中心点击 */
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            padding: 0 20px;
+            box-sizing: border-box;
+            gap: 15px;
+        }
+
+        .control-panel {
+            background: rgba(15, 15, 20, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 12px 24px;
+            pointer-events: auto; 
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            flex-wrap: wrap;
+            flex: 1;
+            max-width: 1000px;
+        }
+
+        .panel-header {
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .panel-header i {
+            color: #4facfe;
+        }
+
+        .ui-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .ui-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+            white-space: nowrap;
+        }
+
+        .ui-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.5);
+            filter: brightness(1.1);
+        }
+
+        .ui-btn:active {
+            transform: translateY(1px);
+        }
+
+        .ui-btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            box-shadow: none;
+        }
+        
+        .ui-btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .instructions {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 15px;
+            font-size: 12px;
+            color: #ddd;
+            flex-wrap: wrap;
+        }
+
+        .instructions p {
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        
+        .instructions i {
+            color: #4facfe;
+        }
+
+        #status-text {
+            font-size: 12px;
+            color: #4facfe;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* ---------------------------------
+           摄像头小窗
+           --------------------------------- */
+        .camera-container {
+            width: 140px;
+            height: 105px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.2);
+            overflow: hidden;
+            pointer-events: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .camera-container video,
+        .camera-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #process-canvas {
+            display: none;
+        }
+        
+        #loading-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 5, 0.9);
+            backdrop-filter: blur(5px);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: #4facfe;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text" style="font-weight: bold; letter-spacing: 1px;">正在初始化引擎...</div>
+    </div>
+
+    <div id="canvas-container"></div>
+    <canvas id="process-canvas"></canvas>
+
+    <div id="ui-layer">
+        <!-- 底部主控台 -->
+        <div class="control-panel">
+            <div class="panel-header">
+                <i class="fa-solid fa-cube"></i> 粒子点云
+            </div>
+            
+            <div class="ui-controls">
+                <label>
+                    <button class="ui-btn" onclick="document.getElementById('media-upload').click()">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> 导入媒体 (最多10个)
+                    </button>
+                    <input type="file" id="media-upload" accept="image/*,video/mp4,video/webm" multiple>
+                </label>
+                <button class="ui-btn ui-btn-secondary" id="btn-prev" title="上一个">
+                    <i class="fa-solid fa-backward-step"></i>
+                </button>
+                <button class="ui-btn ui-btn-secondary" id="btn-next" title="下一个">
+                    <i class="fa-solid fa-forward-step"></i>
+                </button>
+            </div>
+
+            <div class="instructions">
+                <p><i class="fa-solid fa-hand-sparkles"></i> <span>搅动</span></p>
+                <p><i class="fa-solid fa-hand-paper"></i> <span>扩散</span></p>
+                <p><i class="fa-solid fa-hand-back-fist"></i> <span>握拳切换</span></p>
+                <p><i class="fa-solid fa-hands"></i> <span>双平移旋转</span></p>
+            </div>
+            
+            <div id="status-text">就绪</div>
+        </div>
+
+        <!-- 缩小并移动到底部的摄像头窗 -->
+        <div class="camera-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="guideCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. 全局配置与状态管理
+        // ==========================================
+        const STATES = {
+            IDLE: 'IDLE',       
+            HOVER: 'HOVER',     
+            PINCH: 'PINCH',     
+            EXPLODE: 'EXPLODE',
+            ROTATE_VIEW: 'ROTATE_VIEW' 
+        };
+
+        const CONFIG = {
+            TARGET_PARTICLES: 264000, // 【更新】粒子数量增加20% (220000 -> 264000) 以提高清晰度
+            MAX_PARTICLE_SIZE: 0.097, 
+            MIN_PARTICLE_RATIO: 0.3,  
+            
+            FRICTION: 0.85,          
+            SPRING_STRENGTH: 0.05,   
+            SPRING_FORCE_CAP: 0.001,  // 【降低50%】降低弹簧回复力截断上限 (0.002 -> 0.001)
+            
+            REPEL_RADIUS: 35.0,      
+            REPEL_FORCE: 0.006,      // 【降低50%】降低手势排斥力 (0.012 -> 0.006)
+            EXPLODE_FORCE: 0.02,     // 【降低50%】降低星空扩散与环境水流力 (0.04 -> 0.02)
+            
+            PINCH_THRESHOLD: 0.05,   
+            OPEN_THRESHOLD: 0.35,
+            
+            DEPTH_SCALE: 1.5
+        };
+
+        let currentState = STATES.IDLE;
+        let handPosition = new THREE.Vector3(999, 999, 0); 
+        let targetSceneRotationY = 0; 
+
+        let isArmedForSwitch = false; 
+
+        let mediaSets = [];          
+        let currentMediaIndex = 0;   
+
+        // ==========================================
+        // 2. Three.js 场景初始化
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 30; 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        container.appendChild(renderer.domElement);
+
+        let particleSystem;
+        let geometry;
+        let positions, colors, targetColors, basePositions, velocities, randomSeeds, sizes, targetSizes;
+        let particleCount = 0;
+
+        function getVisiblePlaneSize() {
+            const vFov = camera.fov * Math.PI / 180;
+            const height = 2 * Math.tan(vFov / 2) * camera.position.z;
+            const width = height * camera.aspect;
+            return { width, height };
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ==========================================
+        // 3. UI 交互与统一媒体加载引擎
+        // ==========================================
+        const processCanvas = document.getElementById('process-canvas');
+        const processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
+        const statusText = document.getElementById('status-text');
+        
+        document.getElementById('btn-prev').addEventListener('click', () => switchMedia(-1));
+        document.getElementById('btn-next').addEventListener('click', () => switchMedia(1));
+
+        document.getElementById('media-upload').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files).slice(0, 10);
+            if (files.length === 0) return;
+
+            if (mediaSets[currentMediaIndex] && mediaSets[currentMediaIndex].type === 'video') {
+                mediaSets[currentMediaIndex].videoElement.pause();
+            }
+
+            document.getElementById('loading-overlay').style.display = 'flex';
+            document.getElementById('loading-overlay').style.opacity = '1';
+            document.getElementById('loading-text').innerText = "正在解析媒体文件...";
+
+            const loadedSets = [];
+            for (let file of files) {
+                if (file.type.startsWith('video/')) {
+                    const videoData = await loadVideoFile(file);
+                    if (videoData) loadedSets.push(videoData);
+                } else if (file.type.startsWith('image/')) {
+                    const img = await loadImageFile(file);
+                    const imgData = processImageToPoints(img);
+                    if (imgData) {
+                        loadedSets.push({ type: 'image', ...imgData });
+                    }
+                }
+            }
+
+            if (loadedSets.length > 0) {
+                mediaSets = loadedSets;
+                currentMediaIndex = 0;
+                initParticleSystem();
+                
+                if (mediaSets[currentMediaIndex].type === 'video') {
+                    mediaSets[currentMediaIndex].videoElement.play();
+                }
+                updateStatusText();
+            }
+            
+            document.getElementById('loading-overlay').style.opacity = '0';
+            setTimeout(() => document.getElementById('loading-overlay').style.display = 'none', 500);
+        });
+
+        function updateStatusText() {
+            statusText.innerText = `画面 ${currentMediaIndex + 1} / ${mediaSets.length}`;
+        }
+
+        function loadImageFile(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function loadVideoFile(file) {
+            return new Promise((resolve) => {
+                const video = document.createElement('video');
+                video.muted = true;
+                video.loop = true;
+                video.playsInline = true;
+                video.src = URL.createObjectURL(file);
+                
+                video.onloadedmetadata = () => {
+                    const checkReady = () => {
+                        if (video.videoWidth > 0 && video.videoHeight > 0) {
+                            const planeSize = getVisiblePlaneSize();
+                            const targetWidth = planeSize.width * 0.95;
+                            const targetHeight = planeSize.height * 0.95;
+                            let scale = Math.min(targetWidth / video.videoWidth, targetHeight / video.videoHeight);
+                            
+                            let processWidth = 320;
+                            let processHeight = Math.max(1, Math.floor(processWidth * (video.videoHeight / video.videoWidth)));
+
+                            const finalScale = scale * (video.videoWidth / processWidth);
+
+                            resolve({
+                                type: 'video',
+                                videoElement: video,
+                                processWidth: processWidth,
+                                processHeight: processHeight,
+                                scale: finalScale,
+                                lastTime: 0,
+                                basePositions: new Float32Array(CONFIG.TARGET_PARTICLES * 3),
+                                colors: new Float32Array(CONFIG.TARGET_PARTICLES * 3),
+                                sizes: new Float32Array(CONFIG.TARGET_PARTICLES)
+                            });
+                        } else {
+                            setTimeout(checkReady, 50);
+                        }
+                    };
+                    checkReady();
+                };
+                video.load();
+            });
+        }
+
+        function processImageToPoints(img) {
+            const planeSize = getVisiblePlaneSize();
+            const targetWidth = planeSize.width * 0.95; 
+            const targetHeight = planeSize.height * 0.95;
+            
+            let scale = Math.min(targetWidth / img.width, targetHeight / img.height);
+            const cw = img.width;
+            const ch = img.height;
+            
+            processCanvas.width = cw;
+            processCanvas.height = ch;
+            processCtx.drawImage(img, 0, 0, cw, ch);
+            
+            const imageData = processCtx.getImageData(0, 0, cw, ch).data;
+            const totalPixels = cw * ch;
+            
+            let step = Math.ceil(Math.sqrt(totalPixels / CONFIG.TARGET_PARTICLES));
+            if (step < 1) step = 1;
+
+            const tempPositions = [];
+            const tempColors = [];
+            const tempSizes = []; 
+            
+            for (let y = 0; y < ch; y += step) {
+                for (let x = 0; x < cw; x += step) {
+                    const index = (y * cw + x) * 4;
+                    if (imageData[index + 3] > 50) {
+                        const r = imageData[index] / 255;
+                        const g = imageData[index + 1] / 255;
+                        const b = imageData[index + 2] / 255;
+                        
+                        const pX = (x - cw / 2) * scale;
+                        const pY = -(y - ch / 2) * scale; 
+                        
+                        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                        const pZ = (luminance - 0.5) * CONFIG.DEPTH_SCALE;
+
+                        const pSize = Math.max(CONFIG.MIN_PARTICLE_RATIO, luminance) * CONFIG.MAX_PARTICLE_SIZE;
+
+                        tempPositions.push(pX, pY, pZ);
+                        tempColors.push(r, g, b);
+                        tempSizes.push(pSize);
+                    }
+                }
+            }
+
+            const validCount = tempPositions.length / 3;
+            if (validCount === 0) return null;
+
+            const finalCount = CONFIG.TARGET_PARTICLES;
+            const outPositions = new Float32Array(finalCount * 3);
+            const outColors = new Float32Array(finalCount * 3);
+            const outSizes = new Float32Array(finalCount);
+
+            for (let i = 0; i < finalCount; i++) {
+                let srcIdx = (i < validCount) ? i : Math.floor(Math.random() * validCount);
+                outPositions[i*3] = tempPositions[srcIdx*3];
+                outPositions[i*3+1] = tempPositions[srcIdx*3+1];
+                outPositions[i*3+2] = tempPositions[srcIdx*3+2];
+                
+                outColors[i*3] = tempColors[srcIdx*3];
+                outColors[i*3+1] = tempColors[srcIdx*3+1];
+                outColors[i*3+2] = tempColors[srcIdx*3+2];
+                
+                outSizes[i] = tempSizes[srcIdx]; 
+            }
+
+            return { basePositions: outPositions, colors: outColors, sizes: outSizes };
+        }
+
+        function switchMedia(direction) {
+            if (mediaSets.length <= 1) return;
+            
+            if (mediaSets[currentMediaIndex].type === 'video') {
+                mediaSets[currentMediaIndex].videoElement.pause();
+            }
+            
+            currentMediaIndex = (currentMediaIndex + direction + mediaSets.length) % mediaSets.length;
+            
+            basePositions = mediaSets[currentMediaIndex].basePositions;
+            targetColors = mediaSets[currentMediaIndex].colors;
+            targetSizes = mediaSets[currentMediaIndex].sizes; 
+
+            if (mediaSets[currentMediaIndex].type === 'video') {
+                mediaSets[currentMediaIndex].videoElement.play();
+            }
+            
+            updateStatusText();
+
+            const gustForce = direction > 0 ? -15.0 : 15.0; 
+            for(let i=0; i < particleCount * 3; i+=3) {
+                velocities[i] += gustForce + (Math.random() - 0.5) * 8;
+                velocities[i+1] += (Math.random() - 0.5) * 8;
+                velocities[i+2] += (Math.random() - 0.5) * 15; 
+            }
+        }
+
+        function initParticleSystem() {
+            if (!mediaSets.length) return;
+            particleCount = CONFIG.TARGET_PARTICLES;
+            basePositions = mediaSets[currentMediaIndex].basePositions;
+            targetColors = mediaSets[currentMediaIndex].colors;
+            targetSizes = mediaSets[currentMediaIndex].sizes;
+
+            if (!particleSystem) {
+                positions = new Float32Array(CONFIG.TARGET_PARTICLES * 3); 
+                colors = new Float32Array(CONFIG.TARGET_PARTICLES * 3);
+                sizes = new Float32Array(CONFIG.TARGET_PARTICLES);
+                
+                positions.set(basePositions);
+                colors.set(targetColors);
+                sizes.set(targetSizes);
+
+                velocities = new Float32Array(particleCount * 3).fill(0);
+                randomSeeds = new Float32Array(particleCount * 3);
+                for(let i = 0; i < randomSeeds.length; i++) {
+                    randomSeeds[i] = (Math.random() - 0.5) * 2.0;
+                }
+
+                geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1)); 
+                
+                const material = new THREE.ShaderMaterial({
+                    vertexColors: true, 
+                    vertexShader: `
+                        attribute float size;
+                        varying vec3 vColor;
+                        void main() {
+                            vColor = color;
+                            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                            gl_PointSize = size * (1200.0 / -mvPosition.z);
+                            gl_Position = projectionMatrix * mvPosition;
+                        }
+                    `,
+                    fragmentShader: `
+                        varying vec3 vColor;
+                        void main() {
+                            vec2 xy = gl_PointCoord.xy - vec2(0.5);
+                            float r2 = dot(xy, xy);
+                            
+                            if (r2 > 0.25) discard; 
+                            
+                            float z = sqrt(0.25 - r2);
+                            // 【升级】提升基础亮度，降低球体光影对比度，让暗部粒子更显色
+                            float intensity = 0.55 + (z * 0.9); 
+                            
+                            // 【核心魔法】Gamma 校正: 大幅提升暗部细节，降低全局生硬对比度
+                            vec3 enhancedColor = pow(vColor, vec3(0.65)); 
+                            
+                            // 【核心魔法】提升 20% 的色彩饱和度，让色彩层次更丰富
+                            float lum = dot(enhancedColor, vec3(0.299, 0.587, 0.114));
+                            enhancedColor = mix(vec3(lum), enhancedColor, 1.2);
+                            
+                            gl_FragColor = vec4(enhancedColor * intensity, 1.0);
+                        }
+                    `,
+                    blending: THREE.AdditiveBlending,
+                    transparent: true,
+                    depthWrite: false
+                });
+
+                particleSystem = new THREE.Points(geometry, material);
+                scene.add(particleSystem);
+            }
+            
+            for(let i=0; i < particleCount * 3; i+=3) {
+                positions[i] += randomSeeds[i] * 10;
+                positions[i+1] += randomSeeds[i+1] * 10;
+                positions[i+2] += randomSeeds[i+2] * 10;
+            }
+        }
+
+        // ==========================================
+        // 4. MediaPipe 智能手势系统
+        // ==========================================
+        const videoElement = document.getElementById('videoElement');
+        const guideCanvas = document.getElementById('guideCanvas');
+        const guideCtx = guideCanvas.getContext('2d');
+
+        function getOpenness(landmarks) {
+            const dist = (p1, p2) => Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2);
+            const wrist = landmarks[0];
+            return (dist(landmarks[8], wrist) + dist(landmarks[12], wrist) + dist(landmarks[16], wrist) + dist(landmarks[20], wrist)) / 4;
+        }
+
+        function onResults(results) {
+            guideCtx.save();
+            guideCtx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+            guideCtx.drawImage(results.image, 0, 0, guideCanvas.width, guideCanvas.height);
+            
+            const numHands = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+
+            if (numHands > 0) {
+                for (let i = 0; i < numHands; i++) {
+                    drawConnectors(guideCtx, results.multiHandLandmarks[i], HAND_CONNECTIONS, {color: '#4facfe', lineWidth: 2});
+                    drawLandmarks(guideCtx, results.multiHandLandmarks[i], {color: '#ffffff', lineWidth: 1, radius: 2});
+                }
+
+                if (numHands === 2) {
+                    const open1 = getOpenness(results.multiHandLandmarks[0]);
+                    const open2 = getOpenness(results.multiHandLandmarks[1]);
+                    
+                    if (open1 > CONFIG.OPEN_THRESHOLD && open2 > CONFIG.OPEN_THRESHOLD) {
+                        currentState = STATES.ROTATE_VIEW;
+                        const cx = (results.multiHandLandmarks[0][9].x + results.multiHandLandmarks[1][9].x) / 2;
+                        targetSceneRotationY = (cx - 0.5) * Math.PI;
+                    } else {
+                        currentState = STATES.IDLE;
+                        targetSceneRotationY = 0;
+                    }
+                    isArmedForSwitch = false; 
+                } 
+                else if (numHands === 1) {
+                    targetSceneRotationY = 0; 
+                    
+                    const landmarks = results.multiHandLandmarks[0];
+                    const indexTip = landmarks[8];
+                    const dist = (p1, p2) => Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2);
+                    const pinchDistance = dist(landmarks[4], indexTip);
+                    const averageOpenness = getOpenness(landmarks);
+
+                    const planeSize = getVisiblePlaneSize();
+                    const mappedX = (1.0 - indexTip.x - 0.5) * planeSize.width; 
+                    const mappedY = -(indexTip.y - 0.5) * planeSize.height;
+                    
+                    handPosition.x += (mappedX - handPosition.x) * 0.3;
+                    handPosition.y += (mappedY - handPosition.y) * 0.3;
+                    handPosition.z = 0;
+
+                    if (pinchDistance < CONFIG.PINCH_THRESHOLD) {
+                        currentState = STATES.PINCH;
+                        if (isArmedForSwitch) {
+                            switchMedia(1);
+                            isArmedForSwitch = false; 
+                        }
+                    } else if (averageOpenness > CONFIG.OPEN_THRESHOLD) {
+                        currentState = STATES.EXPLODE;
+                        isArmedForSwitch = true;
+                    } else {
+                        currentState = STATES.HOVER;
+                    }
+                }
+            } else {
+                currentState = STATES.IDLE;
+                targetSceneRotationY = 0; 
+                isArmedForSwitch = false; 
+            }
+            guideCtx.restore();
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2, 
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+        
+        hands.onResults(onResults);
+
+        const cameraFeed = new Camera(videoElement, {
+            onFrame: async () => {
+                guideCanvas.width = videoElement.videoWidth;
+                guideCanvas.height = videoElement.videoHeight;
+                await hands.send({image: videoElement});
+            },
+            width: 320,
+            height: 240
+        });
+        
+        cameraFeed.start().catch(err => {
+            console.error(err);
+            document.getElementById('loading-overlay').style.display = 'none';
+        });
+
+        // ==========================================
+        // 5. 动画渲染与底层物理循环
+        // ==========================================
+        const clock = new THREE.Clock();
+
+        function updateActiveVideoParticles(now, media) {
+            const cw = media.processWidth;
+            const ch = media.processHeight;
+            
+            if (cw <= 0 || ch <= 0) return; 
+
+            if (now - media.lastTime < 1000 / 15) return;
+            media.lastTime = now;
+
+            const scale = media.scale;
+            processCanvas.width = cw;
+            processCanvas.height = ch;
+            processCtx.drawImage(media.videoElement, 0, 0, cw, ch);
+            const imageData = processCtx.getImageData(0, 0, cw, ch).data;
+
+            const tempP = [];
+            const step = Math.max(1, Math.ceil(Math.sqrt((cw * ch) / CONFIG.TARGET_PARTICLES)));
+
+            for (let y = 0; y < ch; y += step) {
+                for (let x = 0; x < cw; x += step) {
+                    const idx = (y * cw + x) * 4;
+                    if (imageData[idx+3] > 50) {
+                        tempP.push(
+                            (x - cw/2)*scale, 
+                            -(y - ch/2)*scale, 
+                            imageData[idx]/255, 
+                            imageData[idx+1]/255, 
+                            imageData[idx+2]/255
+                        );
+                    }
+                }
+            }
+
+            const validCount = tempP.length / 5;
+            if (validCount === 0) return;
+
+            for (let i = 0; i < CONFIG.TARGET_PARTICLES; i++) {
+                let srcIdx = (i < validCount) ? i : (i % validCount); 
+                let pX = tempP[srcIdx*5];
+                let pY = tempP[srcIdx*5 + 1];
+                let r = tempP[srcIdx*5 + 2];
+                let g = tempP[srcIdx*5 + 3];
+                let b = tempP[srcIdx*5 + 4];
+
+                const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                const pZ = (luminance - 0.5) * CONFIG.DEPTH_SCALE;
+                const pSize = Math.max(CONFIG.MIN_PARTICLE_RATIO, luminance) * CONFIG.MAX_PARTICLE_SIZE;
+
+                media.basePositions[i*3] = pX;
+                media.basePositions[i*3+1] = pY;
+                media.basePositions[i*3+2] = pZ;
+
+                media.colors[i*3] = r;
+                media.colors[i*3+1] = g;
+                media.colors[i*3+2] = b;
+                
+                media.sizes[i] = pSize;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const now = performance.now();
+            const time = clock.getElapsedTime();
+
+            const currentMedia = mediaSets[currentMediaIndex];
+            if (currentMedia && currentMedia.type === 'video' && currentMedia.videoElement.readyState >= 2) {
+                updateActiveVideoParticles(now, currentMedia);
+            }
+
+            if (particleSystem && particleCount > 0) {
+                const posAttr = geometry.attributes.position;
+                const colorAttr = geometry.attributes.color;
+                const sizeAttr = geometry.attributes.size;
+                
+                const colorArray = colorAttr.array;
+                const sizeArray = sizeAttr.array;
+                
+                let currentFriction = CONFIG.FRICTION;
+                let currentSpring = CONFIG.SPRING_STRENGTH;
+                let currentForceCap = CONFIG.SPRING_FORCE_CAP; // 控制速度上限
+                let colorNeedsUpdate = false;
+                let sizeNeedsUpdate = false;
+
+                if (currentState === STATES.PINCH) {
+                    currentSpring = 0.1;
+                    currentFriction = 0.8;
+                    currentForceCap = 999.0; // 捏紧时不受强制截断限制，瞬间吸附
+                } else if (currentState === STATES.EXPLODE) {
+                    currentSpring = 0.0001; 
+                    currentFriction = 0.99; 
+                } else if (currentState === STATES.IDLE || currentState === STATES.HOVER || currentState === STATES.ROTATE_VIEW) {
+                    currentSpring = CONFIG.SPRING_STRENGTH;
+                    currentFriction = CONFIG.FRICTION;
+                }
+
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    
+                    let px = positions[i3];
+                    let py = positions[i3 + 1];
+                    let pz = positions[i3 + 2];
+
+                    const bx = basePositions[i3];
+                    const by = basePositions[i3 + 1];
+                    const bz = basePositions[i3 + 2];
+
+                    let vx = velocities[i3];
+                    let vy = velocities[i3 + 1];
+                    let vz = velocities[i3 + 2];
+
+                    let localSpring = currentSpring;
+                    let localFriction = currentFriction;
+                    let localForceCap = currentForceCap;
+
+                    if (currentState === STATES.HOVER) {
+                        const dx = px - handPosition.x;
+                        const dy = py - handPosition.y;
+                        const dz = pz - handPosition.z;
+                        
+                        const distSq = dx * dx + dy * dy + dz * dz;
+                        const radiusSq = CONFIG.REPEL_RADIUS * CONFIG.REPEL_RADIUS;
+
+                        if (distSq < radiusSq) {
+                            const dist = Math.sqrt(distSq) || 0.01;
+                            const influence = (Math.cos((dist / CONFIG.REPEL_RADIUS) * Math.PI) + 1) * 0.5;
+                            
+                            localSpring = currentSpring * (1 - influence * 0.99); 
+                            localFriction = 0.97 + (influence * 0.025); 
+                            localForceCap = 999.0; // 在排斥区间不受复原力截断控制
+                            
+                            const force = influence * CONFIG.REPEL_FORCE;
+                            
+                            vx += (dx / dist) * force * 0.4;
+                            vy += (dy / dist) * force * 0.4;
+                            vz += (dz / dist) * force * 0.4;
+                            
+                            vx -= (dy / dist) * force * 0.8;
+                            vy += (dx / dist) * force * 0.8;
+                            vz += (Math.random() - 0.5) * force * 0.8;
+                        }
+                    }
+
+                    if (currentState === STATES.EXPLODE) {
+                        vx += Math.sin(py * 0.05 + time * 0.2 + randomSeeds[i3]) * CONFIG.EXPLODE_FORCE;
+                        vy += Math.cos(px * 0.05 + time * 0.2 + randomSeeds[i3+1]) * CONFIG.EXPLODE_FORCE;
+                        vz += Math.sin(px * 0.05 + py * 0.05 + time * 0.15) * CONFIG.EXPLODE_FORCE * 0.5;
+                    }
+
+                    // 【核心修改】：回复力截断机制，实现缓慢且匀速的回弹
+                    let fx = (bx - px) * localSpring;
+                    let fy = (by - py) * localSpring;
+                    let fz = (bz - pz) * localSpring;
+
+                    const forceSq = fx*fx + fy*fy + fz*fz;
+                    if (forceSq > localForceCap) {
+                        const m = Math.sqrt(localForceCap / forceSq);
+                        fx *= m; fy *= m; fz *= m;
+                    }
+
+                    vx += fx;
+                    vy += fy;
+                    vz += fz;
+
+                    vx *= localFriction;
+                    vy *= localFriction;
+                    vz *= localFriction;
+
+                    // 【降低50%】物理速度动能上限从 2.0 降到 0.5（速度v减半，v平方即为原来的1/4）
+                    const speedSq = vx*vx + vy*vy + vz*vz;
+                    if(speedSq > 0.5) {
+                        const m = Math.sqrt(0.5 / speedSq);
+                        vx *= m; vy *= m; vz *= m;
+                    }
+
+                    px += vx;
+                    py += vy;
+                    pz += vz;
+
+                    velocities[i3] = vx;
+                    velocities[i3 + 1] = vy;
+                    velocities[i3 + 2] = vz;
+                    
+                    positions[i3] = px;
+                    positions[i3 + 1] = py;
+                    positions[i3 + 2] = pz;
+
+                    const cr = targetColors[i3];
+                    const cg = targetColors[i3+1];
+                    const cb = targetColors[i3+2];
+                    const cSize = targetSizes[i];
+                    
+                    const lerpSpeed = (currentMedia && currentMedia.type === 'video') ? 0.4 : 0.1;
+                    
+                    if (Math.abs(cr - colorArray[i3]) > 0.01 || Math.abs(cg - colorArray[i3+1]) > 0.01) {
+                        colorArray[i3] += (cr - colorArray[i3]) * lerpSpeed;
+                        colorArray[i3+1] += (cg - colorArray[i3+1]) * lerpSpeed;
+                        colorArray[i3+2] += (cb - colorArray[i3+2]) * lerpSpeed;
+                        colorNeedsUpdate = true;
+                    }
+                    
+                    if (Math.abs(cSize - sizeArray[i]) > 0.001) {
+                        sizeArray[i] += (cSize - sizeArray[i]) * lerpSpeed;
+                        sizeNeedsUpdate = true;
+                    }
+                }
+
+                posAttr.needsUpdate = true;
+                if (colorNeedsUpdate) colorAttr.needsUpdate = true;
+                if (sizeNeedsUpdate) sizeAttr.needsUpdate = true;
+            }
+
+            scene.rotation.y += (targetSceneRotationY - scene.rotation.y) * 0.08;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- 生成演示画廊 ---
+        function createDefaultImages() {
+            const defaultTexts = ["UPLOAD MEDIA", "HANDS = VIEW", "CLENCH = NEXT"];
+            let loadedCount = 0;
+            
+            defaultTexts.forEach((txt, idx) => {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = 600; tempCanvas.height = 300;
+                const ctx = tempCanvas.getContext('2d');
+                ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,600,300);
+                ctx.font = 'bold 50px sans-serif';
+                ctx.fillStyle = '#4facfe';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(txt, 300, 150);
+                
+                const img = new Image();
+                img.onload = () => {
+                    const imgData = processImageToPoints(img);
+                    if (imgData) {
+                        mediaSets[idx] = { type: 'image', ...imgData }; 
+                        loadedCount++;
+                        if(loadedCount === defaultTexts.length) {
+                            mediaSets = mediaSets.filter(Boolean); 
+                            initParticleSystem();
+                            updateStatusText();
+                            document.getElementById('loading-overlay').style.opacity = '0';
+                            setTimeout(() => document.getElementById('loading-overlay').style.display = 'none', 500);
+                        }
+                    }
+                };
+                img.src = tempCanvas.toDataURL();
+            });
+        }
+        
+        setTimeout(createDefaultImages, 500);
+
+    </script>
+</body>
+</html>
